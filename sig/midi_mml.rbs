@@ -1,0 +1,45 @@
+# @sidebar midi
+module MIDI
+  module MML
+    class Sequence
+      @mml: String
+      @channel: Integer
+      @velocity: Integer
+
+      def initialize: (String mml, ?channel: Integer, ?velocity: Integer) -> void
+      def events_at: (Integer clock) -> Array[Array[untyped]]
+    end
+
+    class Player
+      @device: MIDI::Device
+      @sequence: Sequence
+      @loop: bool
+      @running: bool
+
+      def initialize: (MIDI::Device device, Sequence sequence, ?loop: bool) -> void
+      def tick: (MIDI::Clock clock) -> void
+      def start: () -> void
+      def stop: () -> void
+      def reset: () -> void
+      def all_notes_off: () -> void
+    end
+
+    class CombinedPlayer
+      @device: MIDI::Device
+      @loop: bool
+      @sequences: Array[Sequence]
+      @enabled: Array[bool]
+
+      def initialize: (MIDI::Device device, ?loop: bool) -> void
+      def add_sequence: (Sequence sequence, ?enabled: bool) -> Integer
+      def enable_sequence: (Integer index) -> void
+      def disable_sequence: (Integer index) -> void
+      def set_sequence_enabled: (Integer index, bool enabled) -> void
+      def tick: (MIDI::Clock clock) -> void
+      def start: () -> void
+      def stop: () -> void
+      def reset: () -> void
+      def all_notes_off: () -> void
+    end
+  end
+end
