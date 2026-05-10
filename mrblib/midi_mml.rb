@@ -116,8 +116,13 @@ module MIDI
         length, dots = parse_length
         clocks = length_to_clocks(length, dots)
 
-        # Check for tie and handle tied durations (&8 notation)
-        loop do
+        # Check for tie and handle tied durations (&8 notation).
+        # NOTE: use `while true` instead of Kernel#loop. mrubyc defines
+        # `loop` in pure Ruby (def loop; while true; yield; end; end)
+        # and the yield+break+closure interaction skips the body, so the
+        # tied duration was never accumulated on device — the leading
+        # note ended up shorter than the MML specifies.
+        while true
           is_tied = false
           # Look ahead for &
           save_pos = @pos
@@ -318,9 +323,16 @@ module MIDI
         base = CLOCKS_PER_WHOLE / length
         total = base
         dot_value = base / 2
-        dots.times do
+        # NOTE: was `dots.times do total += dot_value; dot_value /= 2; end`.
+        # On mrubyc, rebinding (`+=`, `=`) of an outer local inside a block
+        # does not write back to the enclosing scope, so `total` and
+        # `dot_value` stayed at their initial values and dotted notes
+        # silently lost their dot. Use a `while` loop (no closure boundary).
+        i = 0
+        while i < dots
           total += dot_value
           dot_value /= 2
+          i += 1
         end
         total
       end
