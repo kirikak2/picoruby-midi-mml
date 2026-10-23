@@ -119,7 +119,7 @@ module MIDI
     end
 
     # Combined Player - plays multiple sequences simultaneously
-    # Optimized for synchronized multi-part playback with minimal latency
+    # Events at the same clock are sent together, note_offs first
     class CombinedPlayer
       attr_reader :playing
 
@@ -176,7 +176,10 @@ module MIDI
       end
 
       # Process all sequences at the given clock position
-      # All events at the same clock are sent with minimal delay
+      # All note_offs at this clock go out before any note_on, so a note
+      # re-struck on the same clock is not cut. Note offs come only from
+      # the sequences' note_off events (clock-based), so they follow the
+      # tempo of the loop driving tick
       # @param clock [Integer] Current clock count from bpm_loop
       def tick(clock)
         return unless @playing
@@ -188,78 +191,11 @@ module MIDI
         # Detect loop boundary
         if @loop && @last_seq_clock >= 0 && seq_clock < @last_seq_clock
           # Process events at boundary for all enabled sequences
-          boundary_note_ons = []
-          @sequence_entries.each do |entry|
-            if entry[:enabled]
-              events = entry[:sequence].events_at(@longest_length)
-              events.each do |event|
-                case event[:type]
-                when :note_on
-                  duration_ms = (event[:duration_clocks] || 24) * 100
-                  boundary_note_ons << {
-                    type: :note_on,
-                    channel: entry[:sequence].channel,
-                    note: event[:note],
-                    velocity: event[:velocity] || 100,
-                    duration_ms: duration_ms
-                  }
-                when :note_off
-                  @device.note_off(event[:note], channel: entry[:sequence].channel)
-                end
-              end
-            end
-          end
-          if boundary_note_ons.length > 0
-            @device.trigger_batch(boundary_note_ons)
-          end
+          process_events_at(@longest_length)
           all_notes_off
         end
 
-        # Collect events from all sequences, separating note_offs and note_ons
-        note_offs = []
-        note_ons = []
-
-        @sequence_entries.each do |entry|
-          if entry[:enabled]
-            events = entry[:sequence].events_at(seq_clock)
-            events.each do |event|
-              channel = entry[:sequence].channel
-
-              case event[:type]
-              when :note_off
-                note_offs << {event: event, channel: channel}
-              when :note_on
-                note_ons << {event: event, channel: channel}
-              end
-            end
-          end
-        end
-
-        # Send all note_offs first (in sequence order)
-        note_offs.each do |item|
-          @device.note_off(item[:event][:note], channel: item[:channel])
-          remove_active_note(item[:channel], item[:event][:note])
-        end
-
-        # Then send all note_ons as batch
-        if note_ons.length > 0
-          batch_note_ons = []
-          note_ons.each do |item|
-            event = item[:event]
-            channel = item[:channel]
-            duration_ms = (event[:duration_clocks] || 24) * 100
-
-            batch_note_ons << {
-              type: :note_on,
-              channel: channel,
-              note: event[:note],
-              velocity: event[:velocity] || 100,
-              duration_ms: duration_ms
-            }
-            add_active_note(channel, event[:note])
-          end
-          @device.trigger_batch(batch_note_ons)
-        end
+        process_events_at(seq_clock)
 
         @last_seq_clock = seq_clock
 
@@ -318,6 +254,33 @@ module MIDI
       end
 
       private
+
+      # Send the events of all enabled sequences at clock: every note_off
+      # first, then every note_on (in sequence order)
+      def process_events_at(clock)
+        @sequence_entries.each do |entry|
+          if entry[:enabled]
+            channel = entry[:sequence].channel
+            entry[:sequence].events_at(clock).each do |event|
+              if event[:type] == :note_off
+                @device.note_off(event[:note], channel: channel)
+                remove_active_note(channel, event[:note])
+              end
+            end
+          end
+        end
+        @sequence_entries.each do |entry|
+          if entry[:enabled]
+            channel = entry[:sequence].channel
+            entry[:sequence].events_at(clock).each do |event|
+              if event[:type] == :note_on
+                @device.note_on(event[:note], event[:velocity] || 100, channel: channel)
+                add_active_note(channel, event[:note])
+              end
+            end
+          end
+        end
+      end
 
       # Add note to active_notes tracking
       def add_active_note(channel, note)
