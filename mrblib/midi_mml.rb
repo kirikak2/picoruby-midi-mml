@@ -15,6 +15,9 @@ module MIDI
       # Clocks per whole note (24 PPQ * 4 = 96)
       CLOCKS_PER_WHOLE = 96
 
+      # Returned by events_at for a clock with no events
+      NO_EVENTS = []
+
       attr_reader :channel, :total_length, :events
 
       # @param mml [String] MML string to parse
@@ -34,10 +37,13 @@ module MIDI
       end
 
       # Get events at a specific clock position
+      # Players call this on every clock, so it is a lookup in the
+      # clock => events table built by parse, not a scan of @events.
+      # The returned array is shared; do not modify it.
       # @param clock [Integer] Clock position
       # @return [Array<Hash>] Events at this position
       def events_at(clock)
-        @events.select { |e| e[:clock] == clock }
+        @events_by_clock[clock] || NO_EVENTS
       end
 
       private
@@ -95,6 +101,21 @@ module MIDI
         end
 
         @total_length = @clock
+        index_events
+      end
+
+      # Group events by clock for events_at
+      def index_events
+        @events_by_clock = {}
+        @events.each do |e|
+          clock = e[:clock]
+          list = @events_by_clock[clock]
+          if list
+            list << e
+          else
+            @events_by_clock[clock] = [e]
+          end
+        end
       end
 
       def parse_note(note_char)
